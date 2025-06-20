@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # Neo4j Database for Knowledge Graph
+  neo4j:
+    image: neo4j:5.12
+    container_name: mcp-crawl4ai-neo4j
+    ports:
+      - "7474:7474"  # Neo4j Browser (optional)
+      - "7687:7687"  # Bolt protocol
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+    volumes:
+      - mcp_crawl4ai_neo4j_data:/data
+      - mcp_crawl4ai_neo4j_logs:/logs
+    networks:
+      - mcp_crawl4ai_network
+      - proxy
+    restart: unless-stopped
+
+  # MCP Crawl4AI Server
+  mcp-server:
+    build: .
+    container_name: mcp-crawl4ai-server
+    env_file:
+      - .env
+    environment:
+      - VIRTUAL_HOST=${VIRTUAL_HOST}
+      - LETSENCRYPT_HOST=${LETSENCRYPT_HOST}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
+      - HOST=0.0.0.0
+      - PORT=8051
+    expose:
+      - "8051"
+    depends_on:
+      - neo4j
+    networks:
+      - mcp_crawl4ai_network
+      - proxy
+    volumes:
+      - ./scripts:/app/scripts
+      - ./reports:/app/reports
+      - mcp_crawl4ai_server_cache:/app/cache
+    restart: unless-stopped
+
+volumes:
+  mcp_crawl4ai_neo4j_data:
+    name: mcp_crawl4ai_neo4j_data
+  mcp_crawl4ai_neo4j_logs:
+    name: mcp_crawl4ai_neo4j_logs
+  mcp_crawl4ai_server_cache:
+    name: mcp_crawl4ai_server_cache
+
+networks:
+  mcp_crawl4ai_network:
+    name: mcp_crawl4ai_network
+    driver: bridge
+  proxy:
+    external: true 
