@@ -16,7 +16,7 @@ services:
       - mcp_crawl4ai_neo4j_logs:/logs
     networks:
       - mcp_crawl4ai_network
-      - proxy
+      - crowd_due_dill_network
     restart: unless-stopped
 
   # MCP Crawl4AI Server
@@ -37,7 +37,7 @@ services:
       - neo4j
     networks:
       - mcp_crawl4ai_network
-      - proxy
+      - crowd_due_dill_network
     volumes:
       - ./scripts:/app/scripts
       - ./reports:/app/reports
@@ -52,9 +52,9 @@ volumes:
   mcp_crawl4ai_server_cache:
     name: mcp_crawl4ai_server_cache
 
-networks:
-  mcp_crawl4ai_network:
-    name: mcp_crawl4ai_network
-    driver: bridge
-  proxy:
-    external: true 
+  networks:
+    mcp_crawl4ai_network:
+      name: mcp_crawl4ai_network
+      driver: bridge
+    crowd_due_dill_network:
+      external: true 
