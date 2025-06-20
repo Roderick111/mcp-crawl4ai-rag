@@ -1,0 +1,70 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Deploy to server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_KEY }}
+        script: |
+          echo "🚀 Starting deployment..."
+          
+          # Navigate to project directory or clone if doesn't exist
+          if [ ! -d "/opt/mcp-crawl4ai" ]; then
+            echo "📁 Cloning repository..."
+            cd /opt
+            git clone https://github.com/Roderick111/mcp-crawl4ai-rag.git mcp-crawl4ai
+          fi
+          
+          # Update code
+          echo "📥 Pulling latest changes..."
+          cd /opt/mcp-crawl4ai
+          git fetch origin
+          git reset --hard origin/main
+          
+          # Check if .env exists
+          if [ ! -f ".env" ]; then
+            echo "⚠️  Warning: .env file not found. Please create it manually."
+            echo "📝 Copying from .env.example..."
+            cp .env.example .env
+            echo "❗ Remember to edit .env with your actual API keys!"
+          fi
+          
+          # Deploy with Docker Compose
+          echo "🐳 Building and deploying containers..."
+          
+          # Check if production compose file exists, otherwise use regular
+          if [ -f "docker-compose.production.yml" ]; then
+            echo "📦 Using production configuration..."
+            docker compose -f docker-compose.production.yml down || true
+            docker compose -f docker-compose.production.yml build --no-cache
+            docker compose -f docker-compose.production.yml up -d
+          else
+            echo "📦 Using development configuration..."
+            docker compose down || true
+            docker compose build --no-cache
+            docker compose up -d
+          fi
+          
+          # Show status
+          echo "📊 Deployment status:"
+          docker compose ps
+          
+          # Show logs (last 20 lines)
+          echo "📝 Recent logs:"
+          docker compose logs --tail=20
+          
+          echo "✅ Deployment completed!" 
