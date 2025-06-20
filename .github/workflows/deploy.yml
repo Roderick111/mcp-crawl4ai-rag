@@ -26,7 +26,7 @@ jobs:
         
     - name: Deploy to server
       run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.USERNAME }}@${{ secrets.HOST }} << 'EOF'
+        ssh -o StrictHostKeyChecking=no ${{ secrets.USERNAME }}@${{ secrets.HOST }} 'bash -s' << 'ENDSSH'
           echo "🚀 Starting deployment..."
           
           # Navigate to project directory or clone if doesn't exist
@@ -75,4 +75,4 @@ jobs:
           docker compose logs --tail=20
           
           echo "✅ Deployment completed!"
-        EOF 
+        ENDSSH 
