@@ -30,7 +30,7 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 knowledge_graphs_path = Path(__file__).resolve().parent.parent / 'knowledge_graphs'
 sys.path.append(str(knowledge_graphs_path))
 
-from utils import (
+from .utils import (
     get_supabase_client, 
     add_documents_to_supabase, 
     search_documents,
@@ -215,13 +215,28 @@ async def crawl4ai_lifespan(server: FastMCP) -> AsyncIterator[Crawl4AIContext]:
                 print(f"Error closing repository extractor: {e}")
 
 # Initialize FastMCP server
-mcp = FastMCP(
-    "mcp-crawl4ai-rag",
-    description="MCP server for RAG and web crawling with Crawl4AI",
-    lifespan=crawl4ai_lifespan,
-    host=os.getenv("HOST", "0.0.0.0"),
-    port=os.getenv("PORT", "8051")
-)
+# Configure based on transport type
+transport = os.getenv("TRANSPORT", "sse")
+
+if transport == "sse":
+    # For SSE transport, we need host and port
+    host_config = os.getenv("HOST", "0.0.0.0")
+    port_config = int(os.getenv("PORT", "8051"))
+    
+    mcp = FastMCP(
+        "mcp-crawl4ai-rag",
+        description="MCP server for RAG and web crawling with Crawl4AI",
+        lifespan=crawl4ai_lifespan,
+        host=host_config,
+        port=port_config
+    )
+else:
+    # For stdio transport, don't set host and port
+    mcp = FastMCP(
+        "mcp-crawl4ai-rag",
+        description="MCP server for RAG and web crawling with Crawl4AI",
+        lifespan=crawl4ai_lifespan
+    )
 
 def rerank_results(model: CrossEncoder, query: str, results: List[Dict[str, Any]], content_key: str = "content") -> List[Dict[str, Any]]:
     """
