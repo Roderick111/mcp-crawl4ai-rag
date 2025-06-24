@@ -1248,10 +1248,15 @@ async def check_ai_script_hallucinations(ctx: Context, script_path: str) -> str:
         }, indent=2)
         
     except Exception as e:
+        import traceback
+        full_traceback = traceback.format_exc()
         return json.dumps({
             "success": False,
             "script_path": script_path,
-            "error": f"Analysis failed: {str(e)}"
+            "error": f"Analysis failed: {str(e)}",
+            "error_type": type(e).__name__,
+            "full_traceback": full_traceback,
+            "error_location": "Main exception handler"
         }, indent=2)
 
 @mcp.tool()
