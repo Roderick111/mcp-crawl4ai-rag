@@ -447,32 +447,101 @@ class AIScriptAnalyzer:
             self.variable_types[var_name] = "method_result"
     
     def _handle_async_with(self, node: ast.AsyncWith, result: AnalysisResult):
-        """Handle async with statements and track context manager variables"""
+        """Handle async with statements (context managers)"""
         for item in node.items:
-            if item.optional_vars and isinstance(item.optional_vars, ast.Name):
-                var_name = item.optional_vars.id
+            context_expr = item.context_expr
+            
+            # Track async context manager usage
+            if isinstance(context_expr, ast.Call):
+                # AsyncWebCrawler() as crawler
+                if isinstance(context_expr.func, ast.Name):
+                    class_name = context_expr.func.id
+                    
+                    # Check if it's a known class from imports
+                    full_class_name = self._resolve_full_name(class_name)
+                    
+                    # Track the variable assignment for context manager
+                    if item.optional_vars:
+                        if isinstance(item.optional_vars, ast.Name):
+                            var_name = item.optional_vars.id
+                            
+                            # Set variable type for context manager
+                            self.variable_types[var_name] = full_class_name or class_name
+                            
+                            # Record as class instantiation
+                            result.class_instantiations.append(ClassInstantiation(
+                                variable_name=var_name,
+                                class_name=class_name,
+                                args=[self._get_arg_representation(arg) for arg in context_expr.args],
+                                kwargs={
+                                    kw.arg: self._get_arg_representation(kw.value)
+                                    for kw in context_expr.keywords if kw.arg
+                                },
+                                line_number=getattr(node, 'lineno', 0),
+                                full_class_name=full_class_name
+                            ))
+                            
+                            # 🔥 IMPORTANT: Track implicit async context manager methods
+                            # These are commonly hallucinated by AI - __aenter__ and __aexit__
+                            
+                            # Track __aenter__ method call (implicit when entering context)
+                            result.method_calls.append(MethodCall(
+                                object_name=var_name,
+                                method_name="__aenter__",
+                                args=[],
+                                kwargs={},
+                                line_number=getattr(node, 'lineno', 0),
+                                object_type=full_class_name or class_name
+                            ))
+                            
+                            # Track __aexit__ method call (implicit when exiting context)
+                            # This happens at the end of the with block
+                            end_line = getattr(node, 'end_lineno', getattr(node, 'lineno', 0))
+                            result.method_calls.append(MethodCall(
+                                object_name=var_name,
+                                method_name="__aexit__",
+                                args=["None", "None", "None"],  # Standard __aexit__ signature
+                                kwargs={},
+                                line_number=end_line,
+                                object_type=full_class_name or class_name
+                            ))
+                            
+                            # Store context manager info for scope tracking
+                            start_line = getattr(node, 'lineno', 0)
+                            end_line = getattr(node, 'end_lineno', start_line + 10)  # Estimate end
+                            self.context_manager_vars[var_name] = (start_line, end_line, full_class_name or class_name)
                 
-                # If the context manager is a method call, track the result type
-                if isinstance(item.context_expr, ast.Call) and isinstance(item.context_expr.func, ast.Attribute):
-                    # Extract and process the method call
-                    self._extract_method_call(item.context_expr, result)
-                    self.processed_calls.add(id(item.context_expr))
+            elif isinstance(context_expr, ast.Name):
+                # Using an existing variable as context manager
+                var_name = context_expr.id
+                if item.optional_vars and isinstance(item.optional_vars, ast.Name):
+                    alias_name = item.optional_vars.id
                     
-                    # Track context manager scope for pydantic_ai run_stream calls
-                    obj_name = self._get_name_from_node(item.context_expr.func.value)
-                    method_name = item.context_expr.func.attr
-                    
-                    if (obj_name and obj_name in self.variable_types and 
-                        'pydantic_ai' in str(self.variable_types[obj_name]) and 
-                        method_name == 'run_stream'):
+                    # Copy type information
+                    if var_name in self.variable_types:
+                        self.variable_types[alias_name] = self.variable_types[var_name]
                         
-                        # Calculate the scope of this async with block
-                        start_line = getattr(node, 'lineno', 0)
-                        end_line = getattr(node, 'end_lineno', start_line + 50)  # fallback estimate
+                        # Track the implicit async context manager methods
+                        object_type = self.variable_types[var_name]
                         
-                        # For run_stream, the return type is specifically StreamedRunResult
-                        # This is the actual return type, not a generic placeholder
-                        self.context_manager_vars[var_name] = (start_line, end_line, "pydantic_ai.StreamedRunResult")
+                        result.method_calls.append(MethodCall(
+                            object_name=alias_name,
+                            method_name="__aenter__",
+                            args=[],
+                            kwargs={},
+                            line_number=getattr(node, 'lineno', 0),
+                            object_type=object_type
+                        ))
+                        
+                        end_line = getattr(node, 'end_lineno', getattr(node, 'lineno', 0))
+                        result.method_calls.append(MethodCall(
+                            object_name=alias_name,
+                            method_name="__aexit__",
+                            args=["None", "None", "None"],
+                            kwargs={},
+                            line_number=end_line,
+                            object_type=object_type
+                        ))
     
     def _handle_with(self, node: ast.With, result: AnalysisResult):
         """Handle regular with statements and track context manager variables"""

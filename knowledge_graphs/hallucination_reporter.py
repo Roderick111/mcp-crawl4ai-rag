@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from knowledge_graph_validator import (
+from knowledge_graphs.knowledge_graph_validator import (
     ScriptValidationResult, ValidationStatus, ValidationResult
 )
 
@@ -27,16 +27,20 @@ class HallucinationReporter:
     def generate_comprehensive_report(self, validation_result: ScriptValidationResult) -> Dict[str, Any]:
         """Generate a comprehensive report in JSON format"""
         
-        # Categorize validations by status (knowledge graph items only)
+        # Categorize validations by status (ALL items, not just knowledge graph)
         valid_items = []
         invalid_items = []
         uncertain_items = []
         not_found_items = []
         
-        # Process imports (only knowledge graph ones)
+        # Also track knowledge graph specific items
+        kg_valid_items = []
+        kg_invalid_items = []
+        kg_uncertain_items = []
+        kg_not_found_items = []
+        
+        # Process ALL imports (changed from knowledge graph only)
         for val in validation_result.import_validations:
-            if not val.validation.details.get('in_knowledge_graph', False):
-                continue  # Skip external libraries
             item = {
                 'type': 'IMPORT',
                 'name': val.import_info.module,
@@ -48,16 +52,22 @@ class HallucinationReporter:
                     'is_from_import': val.import_info.is_from_import,
                     'alias': val.import_info.alias,
                     'available_classes': val.available_classes,
-                    'available_functions': val.available_functions
+                    'available_functions': val.available_functions,
+                    'in_knowledge_graph': val.validation.details.get('in_knowledge_graph', False)
                 }
             }
+            # Add to main categories (ALL items)
             self._categorize_item(item, val.validation.status, valid_items, invalid_items, uncertain_items, not_found_items)
+            
+            # Add to knowledge graph categories if applicable
+            if val.validation.details.get('in_knowledge_graph', False):
+                self._categorize_item(item, val.validation.status, kg_valid_items, kg_invalid_items, kg_uncertain_items, kg_not_found_items)
         
-        # Process classes (only knowledge graph ones)
+        # Process ALL classes (changed from knowledge graph only)
         for val in validation_result.class_validations:
             class_name = val.class_instantiation.full_class_name or val.class_instantiation.class_name
-            if not self._is_from_knowledge_graph(class_name, validation_result):
-                continue  # Skip external classes
+            is_kg = self._is_from_knowledge_graph(class_name, validation_result)
+            
             item = {
                 'type': 'CLASS_INSTANTIATION',
                 'name': val.class_instantiation.class_name,
@@ -71,18 +81,23 @@ class HallucinationReporter:
                     'args_provided': val.class_instantiation.args,
                     'kwargs_provided': list(val.class_instantiation.kwargs.keys()),
                     'constructor_params': val.constructor_params,
-                    'parameter_validation': self._serialize_validation_result(val.parameter_validation) if val.parameter_validation else None
+                    'parameter_validation': self._serialize_validation_result(val.parameter_validation) if val.parameter_validation else None,
+                    'in_knowledge_graph': is_kg
                 }
             }
+            # Add to main categories (ALL items)
             self._categorize_item(item, val.validation.status, valid_items, invalid_items, uncertain_items, not_found_items)
+            
+            # Add to knowledge graph categories if applicable
+            if is_kg:
+                self._categorize_item(item, val.validation.status, kg_valid_items, kg_invalid_items, kg_uncertain_items, kg_not_found_items)
         
         # Track reported items to avoid duplicates
         reported_items = set()
         
-        # Process methods (only knowledge graph ones)
+        # Process ALL methods (changed from knowledge graph only)
         for val in validation_result.method_validations:
-            if not (val.method_call.object_type and self._is_from_knowledge_graph(val.method_call.object_type, validation_result)):
-                continue  # Skip external methods
+            is_kg = val.method_call.object_type and self._is_from_knowledge_graph(val.method_call.object_type, validation_result)
             
             # Create unique key to avoid duplicates
             key = (val.method_call.line_number, val.method_call.method_name, val.method_call.object_type)
@@ -102,15 +117,20 @@ class HallucinationReporter:
                         'kwargs_provided': list(val.method_call.kwargs.keys()),
                         'expected_params': val.expected_params,
                         'parameter_validation': self._serialize_validation_result(val.parameter_validation) if val.parameter_validation else None,
-                        'suggestions': val.validation.suggestions
+                        'suggestions': val.validation.suggestions,
+                        'in_knowledge_graph': is_kg
                     }
                 }
+                # Add to main categories (ALL items)
                 self._categorize_item(item, val.validation.status, valid_items, invalid_items, uncertain_items, not_found_items)
+                
+                # Add to knowledge graph categories if applicable
+                if is_kg:
+                    self._categorize_item(item, val.validation.status, kg_valid_items, kg_invalid_items, kg_uncertain_items, kg_not_found_items)
         
-        # Process attributes (only knowledge graph ones) - but skip if already reported as method
+        # Process ALL attributes (changed from knowledge graph only)
         for val in validation_result.attribute_validations:
-            if not (val.attribute_access.object_type and self._is_from_knowledge_graph(val.attribute_access.object_type, validation_result)):
-                continue  # Skip external attributes
+            is_kg = val.attribute_access.object_type and self._is_from_knowledge_graph(val.attribute_access.object_type, validation_result)
             
             # Create unique key - if this was already reported as a method, skip it
             key = (val.attribute_access.line_number, val.attribute_access.attribute_name, val.attribute_access.object_type)
@@ -126,15 +146,21 @@ class HallucinationReporter:
                     'confidence': val.validation.confidence,
                     'message': val.validation.message,
                     'details': {
-                        'expected_type': val.expected_type
+                        'expected_type': val.expected_type,
+                        'in_knowledge_graph': is_kg
                     }
                 }
+                # Add to main categories (ALL items)
                 self._categorize_item(item, val.validation.status, valid_items, invalid_items, uncertain_items, not_found_items)
+                
+                # Add to knowledge graph categories if applicable
+                if is_kg:
+                    self._categorize_item(item, val.validation.status, kg_valid_items, kg_invalid_items, kg_uncertain_items, kg_not_found_items)
         
-        # Process functions (only knowledge graph ones)
+        # Process ALL functions (changed from knowledge graph only)
         for val in validation_result.function_validations:
-            if not (val.function_call.full_name and self._is_from_knowledge_graph(val.function_call.full_name, validation_result)):
-                continue  # Skip external functions
+            is_kg = val.function_call.full_name and self._is_from_knowledge_graph(val.function_call.full_name, validation_result)
+            
             item = {
                 'type': 'FUNCTION_CALL',
                 'name': val.function_call.function_name,
@@ -147,15 +173,21 @@ class HallucinationReporter:
                     'args_provided': val.function_call.args,
                     'kwargs_provided': list(val.function_call.kwargs.keys()),
                     'expected_params': val.expected_params,
-                    'parameter_validation': self._serialize_validation_result(val.parameter_validation) if val.parameter_validation else None
+                    'parameter_validation': self._serialize_validation_result(val.parameter_validation) if val.parameter_validation else None,
+                    'in_knowledge_graph': is_kg
                 }
             }
+            # Add to main categories (ALL items)
             self._categorize_item(item, val.validation.status, valid_items, invalid_items, uncertain_items, not_found_items)
+            
+            # Add to knowledge graph categories if applicable
+            if is_kg:
+                self._categorize_item(item, val.validation.status, kg_valid_items, kg_invalid_items, kg_uncertain_items, kg_not_found_items)
         
         # Create library summary
         library_summary = self._create_library_summary(validation_result)
         
-        # Generate report
+        # Generate report with BOTH total validations AND knowledge graph specific validations
         report = {
             'analysis_metadata': {
                 'script_path': validation_result.script_path,
@@ -174,6 +206,14 @@ class HallucinationReporter:
                 'uncertain_count': len(uncertain_items),
                 'not_found_count': len(not_found_items),
                 'hallucination_rate': len(invalid_items + not_found_items) / max(1, len(valid_items) + len(invalid_items) + len(not_found_items))
+            },
+            'knowledge_graph_summary': {
+                'kg_total_validations': len(kg_valid_items) + len(kg_invalid_items) + len(kg_uncertain_items) + len(kg_not_found_items),
+                'kg_valid_count': len(kg_valid_items),
+                'kg_invalid_count': len(kg_invalid_items),
+                'kg_uncertain_count': len(kg_uncertain_items),
+                'kg_not_found_count': len(kg_not_found_items),
+                'kg_hallucination_rate': len(kg_invalid_items + kg_not_found_items) / max(1, len(kg_valid_items) + len(kg_invalid_items) + len(kg_not_found_items))
             },
             'libraries_analyzed': library_summary,
             'validation_details': {

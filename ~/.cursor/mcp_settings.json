@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "crawl4ai-rag": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["/Users/danielmedina/Documents/mcp-crawl4ai-rag-main/src/crawl4ai_mcp.py"],
+      "env": {
+        "TRANSPORT": "stdio",
+        "USE_KNOWLEDGE_GRAPH": "true"
+      },
+      "enabled": true,
+      "description": "MCP server for RAG and web crawling with Crawl4AI - includes AI hallucination detection"
+    }
+  }
+} 

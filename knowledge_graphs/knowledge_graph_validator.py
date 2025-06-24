@@ -201,28 +201,46 @@ class KnowledgeGraphValidator:
                 status=ValidationStatus.VALID,
                 confidence=0.9,
                 message=f"Module '{search_module}' found in knowledge graph",
-                details={"matched_files": available_files, "in_knowledge_graph": True}
-            )
-            
-            return ImportValidation(
-                import_info=import_info,
-                validation=validation,
-                available_classes=classes,
-                available_functions=functions
+                details={
+                    "in_knowledge_graph": True,
+                    "available_files": available_files,
+                    "module_type": "parsed_repository"
+                }
             )
         else:
-            # External library - mark as such but don't treat as error
-            validation = ValidationResult(
-                status=ValidationStatus.UNCERTAIN,
-                confidence=0.8,  # High confidence it's external, not an error
-                message=f"Module '{search_module}' is external (not in knowledge graph)",
-                details={"could_be_external": True, "in_knowledge_graph": False}
-            )
+            # Check if it's a similar module
+            similar_modules = await self._find_similar_modules(search_module)
             
-            return ImportValidation(
-                import_info=import_info,
-                validation=validation
-            )
+            if similar_modules:
+                validation = ValidationResult(
+                    status=ValidationStatus.UNCERTAIN,
+                    confidence=0.6,
+                    message=f"Module '{search_module}' not found, but similar modules exist",
+                    details={
+                        "in_knowledge_graph": False,
+                        "similar_modules": similar_modules,
+                        "suggestions": [f"Did you mean '{mod}'?" for mod in similar_modules[:3]]
+                    },
+                    suggestions=[f"Consider using '{mod}' instead" for mod in similar_modules[:3]]
+                )
+            else:
+                # External library - not an error, just not in our knowledge graph
+                validation = ValidationResult(
+                    status=ValidationStatus.UNCERTAIN,
+                    confidence=0.8,
+                    message=f"Module '{search_module}' is external (not in knowledge graph)",
+                    details={
+                        "in_knowledge_graph": False,
+                        "module_type": "external_library"
+                    }
+                )
+        
+        return ImportValidation(
+            import_info=import_info,
+            validation=validation,
+            available_classes=classes if available_files else [],
+            available_functions=functions if available_files else []
+        )
     
     async def _validate_class_instantiations(self, instantiations: List[ClassInstantiation]) -> List[ClassValidation]:
         """Validate class instantiations"""

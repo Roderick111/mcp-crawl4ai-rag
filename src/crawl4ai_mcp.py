@@ -28,25 +28,58 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 
 # Add knowledge_graphs folder to path for importing knowledge graph modules
 knowledge_graphs_path = Path(__file__).resolve().parent.parent / 'knowledge_graphs'
-sys.path.append(str(knowledge_graphs_path))
+project_root_path = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(knowledge_graphs_path))
+sys.path.insert(0, str(project_root_path))
 
-from .utils import (
-    get_supabase_client, 
-    add_documents_to_supabase, 
-    search_documents,
-    extract_code_blocks,
-    generate_code_example_summary,
-    add_code_examples_to_supabase,
-    update_source_info,
-    extract_source_summary,
-    search_code_examples
-)
+try:
+    from .utils import (
+        get_supabase_client, 
+        add_documents_to_supabase, 
+        search_documents,
+        extract_code_blocks,
+        generate_code_example_summary,
+        add_code_examples_to_supabase,
+        update_source_info,
+        extract_source_summary,
+        search_code_examples
+    )
+except ImportError:
+    # When running as script directly
+    from utils import (
+        get_supabase_client, 
+        add_documents_to_supabase, 
+        search_documents,
+        extract_code_blocks,
+        generate_code_example_summary,
+        add_code_examples_to_supabase,
+        update_source_info,
+        extract_source_summary,
+        search_code_examples
+    )
 
 # Import knowledge graph modules
-from knowledge_graphs.knowledge_graph_validator import KnowledgeGraphValidator
-from knowledge_graphs.parse_repo_into_neo4j import DirectNeo4jExtractor
-from knowledge_graphs.ai_script_analyzer import AIScriptAnalyzer
-from knowledge_graphs.hallucination_reporter import HallucinationReporter
+try:
+    from knowledge_graphs.knowledge_graph_validator import KnowledgeGraphValidator
+    from knowledge_graphs.parse_repo_into_neo4j import DirectNeo4jExtractor
+    from knowledge_graphs.ai_script_analyzer import AIScriptAnalyzer
+    from knowledge_graphs.hallucination_reporter import HallucinationReporter
+except ImportError as e:
+    print(f"Warning: Knowledge graph modules not available: {e}")
+    # Create dummy classes to prevent failures
+    class KnowledgeGraphValidator:
+        def __init__(self, *args, **kwargs): pass
+        async def initialize(self): pass
+    
+    class DirectNeo4jExtractor:
+        def __init__(self, *args, **kwargs): pass
+        async def initialize(self): pass
+    
+    class AIScriptAnalyzer:
+        def __init__(self, *args, **kwargs): pass
+    
+    class HallucinationReporter:
+        def __init__(self, *args, **kwargs): pass
 
 # Load environment variables from the project root .env file
 project_root = Path(__file__).resolve().parent.parent

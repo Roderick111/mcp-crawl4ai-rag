@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "crawl4ai-rag": {
+      "url": "http://188.34.196.228:8051",
+      "enabled": true,
+      "description": "Crawl4AI RAG MCP server with AI hallucination detection and knowledge graph capabilities"
+    }
+  }
+} 
