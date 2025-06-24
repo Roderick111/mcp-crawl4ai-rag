@@ -1102,22 +1102,30 @@ class KnowledgeGraphValidator:
     
     async def _find_similar_modules(self, module_name: str) -> List[str]:
         """Find similar repository names for suggestions"""
-        async with self.driver.session() as session:
-            query = """
-            MATCH (r:Repository)
-            WHERE toLower(r.name) CONTAINS toLower($partial_name)
-               OR toLower(replace(r.name, '-', '_')) CONTAINS toLower($partial_name)
-               OR toLower(replace(r.name, '_', '-')) CONTAINS toLower($partial_name)
-            RETURN r.name
-            LIMIT 5
-            """
-            
-            result = await session.run(query, partial_name=module_name[:3])
-            suggestions = []
-            async for record in result:
-                suggestions.append(record['name'])
-            
-            return suggestions
+        try:
+            async with self.driver.session() as session:
+                query = """
+                MATCH (r:Repository)
+                WHERE toLower(r.name) CONTAINS toLower($partial_name)
+                   OR toLower(replace(r.name, '-', '_')) CONTAINS toLower($partial_name)
+                   OR toLower(replace(r.name, '_', '-')) CONTAINS toLower($partial_name)
+                RETURN r.name as name
+                LIMIT 5
+                """
+                
+                result = await session.run(query, partial_name=module_name[:3])
+                suggestions = []
+                async for record in result:
+                    try:
+                        suggestions.append(record['name'])
+                    except KeyError:
+                        # Fallback: try accessing as r.name if alias doesn't work
+                        suggestions.append(record.get('r.name', 'unknown_repo'))
+                
+                return suggestions
+        except Exception as e:
+            logger.warning(f"Error finding similar modules for '{module_name}': {e}")
+            return []
     
     async def _find_similar_methods(self, class_name: str, method_name: str) -> List[str]:
         """Find similar method names for suggestions"""
