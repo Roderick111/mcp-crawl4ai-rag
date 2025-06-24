@@ -92,12 +92,19 @@ class AIScriptAnalyzer:
         
     def analyze_script(self, script_path: str) -> AnalysisResult:
         """Analyze a Python script and extract all relevant information"""
+        result = AnalysisResult(file_path=script_path)
+        
         try:
             with open(script_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            tree = ast.parse(content)
-            result = AnalysisResult(file_path=script_path)
+            try:
+                tree = ast.parse(content)
+            except SyntaxError as se:
+                error_msg = f"Syntax error in {script_path}: {str(se)}"
+                logger.error(error_msg)
+                result.errors.append(error_msg)
+                return result
             
             # Reset state for new analysis
             self.import_map.clear()
@@ -109,16 +116,35 @@ class AIScriptAnalyzer:
             self.method_call_attributes = set()
             
             # First pass: collect imports and build import map
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.Import, ast.ImportFrom)):
-                    self._extract_imports(node, result)
+            try:
+                for node in ast.walk(tree):
+                    if isinstance(node, (ast.Import, ast.ImportFrom)):
+                        try:
+                            self._extract_imports(node, result)
+                        except Exception as e:
+                            logger.warning(f"Error extracting import at line {getattr(node, 'lineno', 0)}: {e}")
+            except Exception as e:
+                error_msg = f"Error during import analysis: {str(e)}"
+                logger.warning(error_msg)
+                result.errors.append(error_msg)
             
             # Second pass: analyze usage patterns
-            for node in ast.walk(tree):
-                self._analyze_node(node, result)
+            try:
+                for node in ast.walk(tree):
+                    try:
+                        self._analyze_node(node, result)
+                    except Exception as e:
+                        logger.warning(f"Error analyzing node {type(node).__name__} at line {getattr(node, 'lineno', 0)}: {e}")
+            except Exception as e:
+                error_msg = f"Error during node analysis: {str(e)}"
+                logger.warning(error_msg)
+                result.errors.append(error_msg)
             
             # Set inferred types on method calls and attribute accesses
-            self._infer_object_types(result)
+            try:
+                self._infer_object_types(result)
+            except Exception as e:
+                logger.warning(f"Error during type inference: {e}")
             
             result.variable_types = self.variable_types.copy()
             
@@ -127,7 +153,6 @@ class AIScriptAnalyzer:
         except Exception as e:
             error_msg = f"Failed to analyze script {script_path}: {str(e)}"
             logger.error(error_msg)
-            result = AnalysisResult(file_path=script_path)
             result.errors.append(error_msg)
             return result
     
@@ -137,13 +162,15 @@ class AIScriptAnalyzer:
         
         if isinstance(node, ast.Import):
             for alias in node.names:
-                import_name = alias.name
-                alias_name = alias.asname or import_name
+                import_name = getattr(alias, 'name', None)
+                if not import_name:
+                    continue
+                alias_name = getattr(alias, 'asname', None) or import_name
                 
                 result.imports.append(ImportInfo(
                     module=import_name,
                     name=import_name,
-                    alias=alias.asname,
+                    alias=getattr(alias, 'asname', None),
                     is_from_import=False,
                     line_number=line_num
                 ))
@@ -151,15 +178,17 @@ class AIScriptAnalyzer:
                 self.import_map[alias_name] = import_name
                 
         elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
+            module = getattr(node, 'module', None) or ""
             for alias in node.names:
-                import_name = alias.name
-                alias_name = alias.asname or import_name
+                import_name = getattr(alias, 'name', None)
+                if not import_name:
+                    continue
+                alias_name = getattr(alias, 'asname', None) or import_name
                 
                 result.imports.append(ImportInfo(
                     module=module,
                     name=import_name,
-                    alias=alias.asname,
+                    alias=getattr(alias, 'asname', None),
                     is_from_import=True,
                     line_number=line_num
                 ))
@@ -177,21 +206,24 @@ class AIScriptAnalyzer:
         
         # Assignments (class instantiations and method call results)
         if isinstance(node, ast.Assign):
-            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                if isinstance(node.value, ast.Call):
-                    # Check if it's a class instantiation or method call
-                    if isinstance(node.value.func, ast.Name):
-                        # Direct function/class call
-                        self._extract_class_instantiation(node, result)
-                        # Mark this call as processed to avoid duplicate processing
-                        self.processed_calls.add(id(node.value))
-                    elif isinstance(node.value.func, ast.Attribute):
-                        # Method call - track the variable assignment for type inference
-                        var_name = node.targets[0].id
-                        self._track_method_result_assignment(node.value, var_name)
-                        # Still process the method call
-                        self._extract_method_call(node.value, result)
-                        self.processed_calls.add(id(node.value))
+            try:
+                if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                    target_id = getattr(node.targets[0], 'id', None)
+                    if target_id and isinstance(node.value, ast.Call):
+                        # Check if it's a class instantiation or method call
+                        if isinstance(node.value.func, ast.Name):
+                            # Direct function/class call
+                            self._extract_class_instantiation(node, result)
+                            # Mark this call as processed to avoid duplicate processing
+                            self.processed_calls.add(id(node.value))
+                        elif isinstance(node.value.func, ast.Attribute):
+                            # Method call - track the variable assignment for type inference
+                            self._track_method_result_assignment(node.value, target_id)
+                            # Still process the method call
+                            self._extract_method_call(node.value, result)
+                            self.processed_calls.add(id(node.value))
+            except Exception as e:
+                logger.warning(f"Error processing assignment at line {line_num}: {e}")
         
         # AsyncWith statements (context managers)
         elif isinstance(node, ast.AsyncWith):
@@ -360,36 +392,50 @@ class AIScriptAnalyzer:
     
     def _get_name_from_call(self, node: ast.AST) -> Optional[str]:
         """Get the name from a call node (for class instantiation)"""
-        if isinstance(node, ast.Name):
-            return node.id
-        elif isinstance(node, ast.Attribute):
-            value_name = self._get_name_from_node(node.value)
-            if value_name:
-                return f"{value_name}.{node.attr}"
+        try:
+            if isinstance(node, ast.Name):
+                return getattr(node, 'id', None)
+            elif isinstance(node, ast.Attribute):
+                value_name = self._get_name_from_node(node.value)
+                attr_name = getattr(node, 'attr', None)
+                if value_name and attr_name:
+                    return f"{value_name}.{attr_name}"
+                elif attr_name:
+                    return attr_name
+        except Exception as e:
+            logger.warning(f"Error getting name from call node {type(node)}: {e}")
         return None
     
     def _get_name_from_node(self, node: ast.AST) -> Optional[str]:
         """Get string representation of a node (for object names)"""
-        if isinstance(node, ast.Name):
-            return node.id
-        elif isinstance(node, ast.Attribute):
-            value_name = self._get_name_from_node(node.value)
-            if value_name:
-                return f"{value_name}.{node.attr}"
+        try:
+            if isinstance(node, ast.Name):
+                return getattr(node, 'id', None)
+            elif isinstance(node, ast.Attribute):
+                value_name = self._get_name_from_node(node.value)
+                attr_name = getattr(node, 'attr', None)
+                if value_name and attr_name:
+                    return f"{value_name}.{attr_name}"
+        except Exception as e:
+            logger.warning(f"Error getting name from node {type(node)}: {e}")
         return None
     
     def _get_arg_representation(self, node: ast.AST) -> str:
         """Get string representation of an argument"""
-        if isinstance(node, ast.Constant):
-            return repr(node.value)
-        elif isinstance(node, ast.Name):
-            return node.id
-        elif isinstance(node, ast.Attribute):
-            return self._get_name_from_node(node) or "<?>"
-        elif isinstance(node, ast.Call):
-            func_name = self._get_name_from_call(node.func)
-            return f"{func_name}(...)" if func_name else "call(...)"
-        else:
+        try:
+            if isinstance(node, ast.Constant):
+                return repr(getattr(node, 'value', '<?>'))
+            elif isinstance(node, ast.Name):
+                return getattr(node, 'id', '<?>')
+            elif isinstance(node, ast.Attribute):
+                return self._get_name_from_node(node) or "<?>"
+            elif isinstance(node, ast.Call):
+                func_name = self._get_name_from_call(node.func)
+                return f"{func_name}(...)" if func_name else "call(...)"
+            else:
+                return f"<{type(node).__name__}>"
+        except Exception as e:
+            logger.warning(f"Error getting arg representation for {type(node)}: {e}")
             return f"<{type(node).__name__}>"
     
     def _is_likely_class_instantiation(self, func_name: str, full_name: Optional[str]) -> bool:
@@ -455,7 +501,9 @@ class AIScriptAnalyzer:
             if isinstance(context_expr, ast.Call):
                 # AsyncWebCrawler() as crawler
                 if isinstance(context_expr.func, ast.Name):
-                    class_name = context_expr.func.id
+                    class_name = getattr(context_expr.func, 'id', None)
+                    if not class_name:
+                        continue
                     
                     # Check if it's a known class from imports
                     full_class_name = self._resolve_full_name(class_name)
@@ -463,7 +511,9 @@ class AIScriptAnalyzer:
                     # Track the variable assignment for context manager
                     if item.optional_vars:
                         if isinstance(item.optional_vars, ast.Name):
-                            var_name = item.optional_vars.id
+                            var_name = getattr(item.optional_vars, 'id', None)
+                            if not var_name:
+                                continue
                             
                             # Set variable type for context manager
                             self.variable_types[var_name] = full_class_name or class_name
@@ -513,9 +563,13 @@ class AIScriptAnalyzer:
                 
             elif isinstance(context_expr, ast.Name):
                 # Using an existing variable as context manager
-                var_name = context_expr.id
+                var_name = getattr(context_expr, 'id', None)
+                if not var_name:
+                    continue
                 if item.optional_vars and isinstance(item.optional_vars, ast.Name):
-                    alias_name = item.optional_vars.id
+                    alias_name = getattr(item.optional_vars, 'id', None)
+                    if not alias_name:
+                        continue
                     
                     # Copy type information
                     if var_name in self.variable_types:

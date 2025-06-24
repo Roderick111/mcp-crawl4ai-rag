@@ -174,7 +174,7 @@ async def crawl4ai_lifespan(server: FastMCP) -> AsyncIterator[Crawl4AIContext]:
     
     # Initialize the crawler
     crawler = AsyncWebCrawler(config=browser_config)
-    await crawler.__aenter__()
+    await crawler.start()
     
     # Initialize Supabase client
     supabase_client = get_supabase_client()
@@ -233,7 +233,7 @@ async def crawl4ai_lifespan(server: FastMCP) -> AsyncIterator[Crawl4AIContext]:
         )
     finally:
         # Clean up all components
-        await crawler.__aexit__(None, None, None)
+        await crawler.close()
         if knowledge_validator:
             try:
                 await knowledge_validator.close()
@@ -1167,18 +1167,60 @@ async def check_ai_script_hallucinations(ctx: Context, script_path: str) -> str:
             }, indent=2)
         
         # Step 1: Analyze script structure using AST
-        analyzer = AIScriptAnalyzer()
-        analysis_result = analyzer.analyze_script(script_path)
-        
-        if analysis_result.errors:
-            print(f"Analysis warnings for {script_path}: {analysis_result.errors}")
+        try:
+            analyzer = AIScriptAnalyzer()
+            analysis_result = analyzer.analyze_script(script_path)
+            
+            if analysis_result.errors:
+                print(f"Analysis warnings for {script_path}: {analysis_result.errors}")
+        except Exception as ast_error:
+            import traceback
+            return json.dumps({
+                "success": False,
+                "script_path": script_path,
+                "error": f"AST Analysis failed: {str(ast_error)}",
+                "error_type": type(ast_error).__name__,
+                "error_details": "The script contains syntax or structures that could not be parsed",
+                "traceback": traceback.format_exc()[-1000:]  # Last 1000 chars of traceback
+            }, indent=2)
         
         # Step 2: Validate against knowledge graph
-        validation_result = await knowledge_validator.validate_script(analysis_result)
+        try:
+            validation_result = await knowledge_validator.validate_script(analysis_result)
+        except Exception as validation_error:
+            import traceback
+            return json.dumps({
+                "success": False,
+                "script_path": script_path,
+                "error": f"Knowledge graph validation failed: {str(validation_error)}",
+                "error_type": type(validation_error).__name__,
+                "analysis_successful": True,
+                "analysis_metadata": {
+                    "total_imports": len(analysis_result.imports),
+                    "total_classes": len(analysis_result.class_instantiations),
+                    "total_methods": len(analysis_result.method_calls),
+                    "total_attributes": len(analysis_result.attribute_accesses),
+                    "total_functions": len(analysis_result.function_calls)
+                },
+                "traceback": traceback.format_exc()[-1000:]
+            }, indent=2)
         
         # Step 3: Generate comprehensive report
-        reporter = HallucinationReporter()
-        report = reporter.generate_comprehensive_report(validation_result)
+        try:
+            reporter = HallucinationReporter()
+            report = reporter.generate_comprehensive_report(validation_result)
+        except Exception as report_error:
+            import traceback
+            return json.dumps({
+                "success": False,
+                "script_path": script_path,
+                "error": f"Report generation failed: {str(report_error)}",
+                "error_type": type(report_error).__name__,
+                "analysis_successful": True,
+                "validation_successful": True,
+                "overall_confidence": validation_result.overall_confidence,
+                "traceback": traceback.format_exc()[-1000:]
+            }, indent=2)
         
         # Format response with comprehensive information
         return json.dumps({
